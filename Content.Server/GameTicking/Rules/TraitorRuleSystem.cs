@@ -124,7 +124,6 @@ public sealed class TraitorRuleSystem : GameRuleSystem<TraitorRuleComponent>
         _roleSystem.MindHasRole<TraitorRoleComponent>(mindId, out var traitorRole);
         if (traitorRole is not null)
         {
-            Briefing = GenerateBriefingCharacter(component.Codewords, code, issuer)
             AddComp<RoleBriefingComponent>(traitorRole.Value.Owner);
             Comp<RoleBriefingComponent>(traitorRole.Value.Owner).Briefing = briefing;
         }
