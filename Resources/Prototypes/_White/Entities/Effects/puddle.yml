@@ -4,6 +4,10 @@
   save: false
   description: Trace of liquid
   components:
+    - type: SpawnOnDespawn
+      prototype: PuddleSparkle
+    - type: TimedDespawn
+      lifetime: 60
     - type: Clickable
     - type: FootstepModifier
       footstepSoundCollection:
