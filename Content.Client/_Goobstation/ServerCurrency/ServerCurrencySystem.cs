@@ -13,10 +13,12 @@ public sealed class ServerCurrencySystem : EntitySystem
         SubscribeNetworkEvent<PlayerBalanceUpdateEvent>(UpdateBalance); // We should probably be using net messages here instead, but I dont feel like messing with that right now.
         RaiseNetworkEvent(new PlayerBalanceRequestEvent());
     }
+
     private void UpdateBalance(PlayerBalanceUpdateEvent ev)
     {
         _cachedBalance = ev.NewBalance;
         BalanceChange?.Invoke();
+        return;
     }
 
     /// <summary>

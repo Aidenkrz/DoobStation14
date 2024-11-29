@@ -12,6 +12,8 @@ using Robust.Client.UserInterface;
 using Robust.Client.UserInterface.Controls;
 using Robust.Shared.Timing;
 using Content.Client._Goobstation.ServerCurrency; // Goobstation - Goob Coin
+using Robust.Shared.Utility; // Goobstation - Goob Coin
+using System.Numerics; // Goobstation - Goob Coin
 
 namespace Content.Client.Lobby
 {
@@ -63,6 +65,9 @@ namespace Content.Client.Lobby
 
             _serverCur.BalanceChange += UpdatePlayerBalance; // Goobstation - Goob Coin
 
+            var specifier = new SpriteSpecifier.Rsi(new ResPath("/Textures/_Goobstation/Interface/Misc/server_currency.rsi"), "coin-animated");
+            Lobby!.CurrencyIcon.SetFromSpriteSpecifier(specifier);
+            Lobby!.CurrencyIcon.DisplayRect.TextureScale = new Vector2(4f, 4f);
         }
 
         protected override void Shutdown()

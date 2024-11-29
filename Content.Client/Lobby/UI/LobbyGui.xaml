@@ -98,8 +98,10 @@
                     <controls:HSpacer Spacing="5" />
                     <BoxContainer MinHeight="10" />
                     <!-- Server Currency -->
-                    <Label Name="Balance" Access="Public" StyleClasses="LabelHeadingBigger" VAlign="Center"
-                            HorizontalExpand="True" HorizontalAlignment="Center" />
+                    <BoxContainer Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <AnimatedTextureRect Access="Public" Name="CurrencyIcon" VerticalAlignment="Center" Margin="10 0" />
+                        <Label Name="Balance" Access="Public" StyleClasses="LabelHeadingBigger" VAlign="Center" />
+                    </BoxContainer>
                     <!-- Gold line -->
                     <controls:HLine Color="{x:Static style:StyleNano.NanoGold}" Thickness="2" Access="Public" />
                     <controls:HSpacer Spacing="10" />

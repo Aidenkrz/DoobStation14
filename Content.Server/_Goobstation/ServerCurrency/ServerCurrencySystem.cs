@@ -22,7 +22,7 @@ namespace Content.Server._Goobstation.ServerCurrency
             base.Initialize();
             _currencyMan.BalanceChange += OnBalanceChange;
             SubscribeLocalEvent<RoundRestartCleanupEvent>(OnRoundEndCleanup);
-            SubscribeLocalEvent<RoundEndTextAppendEvent>(OnRoundEndText);
+            SubscribeLocalEvent<RoundEndMessageEvent>(OnRoundEndText);
             SubscribeNetworkEvent<PlayerBalanceRequestEvent>(OnBalanceRequest);
         }
 
@@ -37,7 +37,7 @@ namespace Content.Server._Goobstation.ServerCurrency
             _currencyMan.Save();
         }
 
-        private void OnRoundEndText(RoundEndTextAppendEvent ev)
+        private void OnRoundEndText(RoundEndMessageEvent ev)
         {
             var query = EntityQueryEnumerator<MindContainerComponent, HumanoidAppearanceComponent>();
 
@@ -53,12 +53,12 @@ namespace Content.Server._Goobstation.ServerCurrency
             }
         }
 
-        private void OnBalanceRequest(PlayerBalanceRequestEvent ev, EntitySessionEventArgs eventArgs)
+        private void OnBalanceRequest(PlayerBalanceRequestEvent ev, EntitySessionEventArgs args)
         {
-            var senderSession = eventArgs.SenderSession;
+            var senderSession = args.SenderSession;
             var balance = _currencyMan.GetBalance(senderSession.UserId);
             RaiseNetworkEvent(new PlayerBalanceUpdateEvent(balance, balance), senderSession);
-
+            return;
         }
 
         /// <summary>
