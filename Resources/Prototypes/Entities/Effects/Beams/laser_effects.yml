@@ -1,0 +1,18 @@
+- type: entity
+  name: laser beam segment
+  id: BeamLaser # This is referenced by ConstantLaserGun's EffectPrototype
+  parent: BaseEntity # Minimal parent
+  noSpawn: true # Typically true for entities spawned programmatically by systems
+  components:
+  - type: Transform # Explicitly add if BaseEntity doesn't guarantee it (it usually does)
+  - type: Sprite
+    sprite: Effects/beam.rsi # Placeholder sprite for a beam segment
+    state: red_beam # A specific state, e.g., for a red laser
+    netsync: false # Visuals are usually not net-synced like this directly
+    # Shaders can be applied here if desired, e.g., "unshaded"
+  - type: Beam # The BeamComponent itself. This is Content.Shared.Beam.Components.SharedBeamComponent essentially.
+    # No sound here, as the ConstantLaserGun or controller will handle continuous sounds.
+  - type: TimedDespawn
+    lifetime: 0.2 # Segments should despawn quickly if orphaned. Controller manages overall beam.
+  # No PhysicsComponent here; BeamSystem will add its own specialized fixture & physics to segments.
+  # If segments had their own colliders, it could interfere.

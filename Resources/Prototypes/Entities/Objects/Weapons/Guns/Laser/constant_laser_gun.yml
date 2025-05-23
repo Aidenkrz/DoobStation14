@@ -1,0 +1,26 @@
+- type: entity
+  name: Constant Laser Gun
+  parent: BaseItem
+  id: ConstantLaserGun
+  description: Emits a continuous beam of concentrated energy. Handle with care.
+  components:
+  - type: Sprite
+    sprite: Objects/Weapons/Guns/Laser/laser_cannon.rsi # Placeholder sprite
+    state: icon
+  - type: Item
+    size: Normal # Using 'Normal' as a common size, can be Large, Small, etc.
+    sprite: Objects/Weapons/Guns/Laser/laser_cannon.rsi # Placeholder sprite for inventory
+  - type: ConstantLaser # Component from Content.Shared.Weapons.Ranged.Components
+    Range: 15.0
+    DamagePerSecond: 8.0
+    EffectPrototype: BeamLaser # To be defined in laser_effects.yml
+    TargetFixtureCollisionGroup: 10 # Represents MobMask (usually 2) | Impassable (usually 8)
+  - type: Tag
+    tags:
+      - WeaponGunLaserConstant # Specific tag for systems or queries
+  - type: EmitSoundOnUse # For a sound when toggling on/off (if applicable to how it's used)
+    sound: /Audio/Weapons/Guns/Laser/laser_heavy_shoot.ogg # Placeholder sound
+  - type: Appearance
+  - type: HeldPrefixSentences # To show item in hand correctly when examined by another player
+    # Example: "is holding a Constant Laser Gun."
+    # This component usually doesn't need specific properties unless overriding defaults.

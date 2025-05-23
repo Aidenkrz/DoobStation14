@@ -84,11 +84,24 @@ public sealed class BeamSystem : SharedBeamSystem
 
     private void OnRemove(EntityUid uid, BeamComponent component, ComponentRemove args)
     {
-        if (component.VirtualBeamController == null)
-            return;
+        // If this entity (uid) was acting as a controller and had created beam segments,
+        // delete those segments. The component.CreatedBeams list identifies these.
+        if (component.CreatedBeams.Count > 0)
+        {
+            foreach (var createdBeamUid in component.CreatedBeams)
+            {
+                // QueueDel handles nulls/invalid UIDs gracefully,
+                // so an explicit EntityExists check isn't strictly necessary here.
+                QueueDel(createdBeamUid);
+            }
+            // It's good practice to clear the collection after processing,
+            // though the component is being removed anyway.
+            component.CreatedBeams.Clear();
+        }
 
-        if (component.CreatedBeams.Count == 0 && component.VirtualBeamController.Value.Valid)
-            QueueDel(component.VirtualBeamController.Value);
+        // The old logic concerning component.VirtualBeamController has been removed
+        // as per the subtask instructions to avoid conflicts with systems like
+        // ConstantLaserSystem that manage their controller's lifecycle explicitly.
     }
 
     /// <summary>
