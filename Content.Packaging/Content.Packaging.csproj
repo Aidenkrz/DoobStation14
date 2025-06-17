@@ -24,6 +24,7 @@ SPDX-License-Identifier: MIT
   <ItemGroup>
     <PackageReference Include="AsmResolver" />
     <PackageReference Include="AsmResolver.DotNet" />
+    <PackageReference Include="Concentus" />
   </ItemGroup>
 
   <Import Project="..\RobustToolbox\MSBuild\Robust.Properties.targets" />
