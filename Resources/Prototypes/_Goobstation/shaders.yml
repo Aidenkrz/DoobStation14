@@ -1,0 +1,5 @@
+- type: shader
+  id: Fade
+  kind: source
+  path: "/Textures/_Goobstation/Shaders/fade.swsl"
+  render_mode: "unshaded"

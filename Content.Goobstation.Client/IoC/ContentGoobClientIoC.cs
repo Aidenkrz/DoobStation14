@@ -13,6 +13,8 @@ using Content.Goobstation.Client.MisandryBox.Spider;
 using Content.Goobstation.Client.Redial;
 using Content.Goobstation.Client.ServerCurrency;
 using Content.Goobstation.Client.Voice;
+using Content.Goobstation.Client.Overlays;
+using Content.Goobstation.Common.Overlays;
 using Content.Goobstation.Common.MisandryBox;
 using Content.Goobstation.Common.ServerCurrency;
 using Content.Goobstation.Shared.MisandryBox.JumpScare;
@@ -32,5 +34,6 @@ internal static class ContentGoobClientIoC
         collection.Register<IFullScreenImageJumpscare, ClientFullScreenImageJumpscare>();
         collection.Register<ISpiderManager, ClientSpiderManager>();
         collection.Register<ICommonCurrencyManager, ClientCurrencyManager>();
+        collection.Register<IFadeEffectManager, FadeEffectManager>();
     }
 }

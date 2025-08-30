@@ -9,6 +9,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 using Content.Goobstation.Client.IoC;
+using Content.Goobstation.Common.Overlays;
 using Content.Goobstation.Client.Voice;
 using Content.Goobstation.Client.JoinQueue;
 using Content.Goobstation.Common.MisandryBox;
@@ -25,6 +26,7 @@ public sealed class EntryPoint : GameClient
     [Dependency] private readonly JoinQueueManager _joinQueue = default!;
     [Dependency] private readonly ISpiderManager _spider = default!;
     [Dependency] private readonly ICommonCurrencyManager _currMan = default!;
+    [Dependency] private readonly IFadeEffectManager _fade = default!;
 
     public override void PreInit()
     {
@@ -47,6 +49,7 @@ public sealed class EntryPoint : GameClient
         _joinQueue.Initialize();
         _spider.Initialize();
         _currMan.Initialize();
+        _fade.Initialize();
     }
 
     public override void Update(ModUpdateLevel level, FrameEventArgs frameEventArgs)
@@ -57,6 +60,7 @@ public sealed class EntryPoint : GameClient
         {
             case ModUpdateLevel.FramePreEngine:
                 _voiceManager.Update();
+                _fade.FrameUpdate(frameEventArgs);
                 break;
         }
     }

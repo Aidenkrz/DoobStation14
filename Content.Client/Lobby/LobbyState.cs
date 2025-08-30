@@ -90,6 +90,7 @@ using Content.Client.Lobby.UI;
 using Content.Client.Message;
 using Content.Client.UserInterface.Systems.Chat;
 using Content.Client.Voting;
+using Content.Goobstation.Common.Overlays;
 using Content.Goobstation.Common.ServerCurrency;
 using Content.Shared.CCVar;
 using Robust.Client;
@@ -114,6 +115,7 @@ namespace Content.Client.Lobby
         [Dependency] private readonly IVoteManager _voteManager = default!;
         [Dependency] private readonly ICommonCurrencyManager _serverCur = default!; // Goobstation - server currency
         [Dependency] private readonly LinkAccountManager _linkAccount = default!; // RMC - Patreon
+        [Dependency] private readonly IFadeEffectManager _fadeEffectManager = default!;
 
         private ISawmill _sawmill = default!; // Goobstation
         private ClientGameTicker _gameTicker = default!;
@@ -124,10 +126,13 @@ namespace Content.Client.Lobby
 
         protected override void Startup()
         {
+            _fadeEffectManager.FadeIn();
+
             if (_userInterfaceManager.ActiveScreen == null)
             {
                 return;
             }
+            OnStateExited += OnStateExit;
 
             Lobby = (LobbyGui) _userInterfaceManager.ActiveScreen;
 
@@ -168,6 +173,7 @@ namespace Content.Client.Lobby
 
         protected override void Shutdown()
         {
+            OnStateExited -= OnStateExit;
             var chatController = _userInterfaceManager.GetUIController<ChatUIController>();
             chatController.SetMainChat(false);
             _gameTicker.InfoBlobUpdated -= UpdateLobbyUi;
@@ -184,6 +190,11 @@ namespace Content.Client.Lobby
             Lobby!.ReadyButton.OnToggled -= OnReadyToggled;
 
             Lobby = null;
+        }
+
+        private void OnStateExit()
+        {
+            _fadeEffectManager.FadeOut();
         }
 
         public void SwitchState(LobbyGui.LobbyGuiState state)
