@@ -1,13 +1,17 @@
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Net.Http.Json;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Threading;
 using System.Threading.Tasks;
 using Content.Shared._Goobstation.CCVar;
 using Prometheus;
 using Robust.Shared.Configuration;
 using Robust.Shared.ContentPack;
 using Robust.Shared.Utility;
-using System.Threading;
 
 namespace Content.Server.TTS;
 
@@ -17,9 +21,9 @@ public sealed class TTSManager
     private static readonly Histogram RequestTimings = Metrics.CreateHistogram(
         "tts_req_timings",
         "Timings of TTS API requests",
-        new HistogramConfiguration()
+        new HistogramConfiguration
         {
-            LabelNames = new[] { "type" },
+            LabelNames = ["type"],
             Buckets = Histogram.ExponentialBuckets(.1, 1.5, 10),
         });
 
@@ -31,17 +35,27 @@ public sealed class TTSManager
         "tts_reused_count",
         "Amount of reused TTS audio from cache.");
 
+    private static readonly Counter DeduplicatedCount = Metrics.CreateCounter(
+        "tts_deduplicated_count",
+        "Amount of TTS requests deduplicated from in-flight requests.");
+
     [Dependency] private readonly IConfigurationManager _cfg = default!;
     [Dependency] private readonly IResourceManager _resource = default!;
+
     private ISawmill _sawmill = default!;
-
+    private HttpClient _httpClient = default!;
     private readonly Dictionary<int, byte[]> _memoryCache = new();
-    private ResPath _cachePath = new();
-    private ResPath _modelPath = new();
+    private readonly Dictionary<int, Task<byte[]?>> _inFlightRequests = new();
+    private readonly object _inFlightLock = new();
 
-    private SemaphoreSlim _generationSemaphore = new SemaphoreSlim(1);
-    private int _queuedGenerations = 0;
+    private ResPath _cachePath;
+    private string _apiUrl = "http://localhost:5000";
+    private string _apiKey = "";
+    private int _requestTimeout = 15;
+    private int _maxRetries = 3;
     private int _maxQueuedGenerations = 20;
+    private int _queuedGenerations;
+    private SemaphoreSlim _generationSemaphore = new(1);
 
     public TTSManager()
     {
@@ -55,223 +69,394 @@ public sealed class TTSManager
 
         _cachePath = MakeDataPath(_cfg.GetCVar(GoobCVars.TTSCachePath));
         _cfg.OnValueChanged(GoobCVars.TTSCachePath, OnCachePathChanged);
-        _modelPath = MakeDataPath(_cfg.GetCVar(GoobCVars.TTSModelPath));
-        _cfg.OnValueChanged(GoobCVars.TTSModelPath, OnModelPathChanged);
+
+        _apiUrl = _cfg.GetCVar(GoobCVars.TTSApiUrl).TrimEnd('/');
+        _cfg.OnValueChanged(GoobCVars.TTSApiUrl, OnApiUrlChanged);
+
+        _apiKey = _cfg.GetCVar(GoobCVars.TTSApiKey);
+        _cfg.OnValueChanged(GoobCVars.TTSApiKey, OnApiKeyChanged);
+
+        _requestTimeout = _cfg.GetCVar(GoobCVars.TTSRequestTimeout);
+        _cfg.OnValueChanged(GoobCVars.TTSRequestTimeout, OnTimeoutChanged);
+
+        _maxRetries = _cfg.GetCVar(GoobCVars.TTSMaxRetries);
+        _cfg.OnValueChanged(GoobCVars.TTSMaxRetries, v => _maxRetries = v);
+
         _generationSemaphore = new SemaphoreSlim(_cfg.GetCVar(GoobCVars.TTSSimultaneousGenerations));
         _cfg.OnValueChanged(GoobCVars.TTSSimultaneousGenerations, OnRateLimitChanged);
-        _maxQueuedGenerations = _cfg.GetCVar(GoobCVars.TTSQueueMax);
-        _cfg.OnValueChanged(GoobCVars.TTSQueueMax, OnQueueMaxChanged);
 
-        // Make the needed directories if they don't exist
-        new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                #if WINDOWS
-                FileName = "cmd.exe",
-                Arguments = $"/C \"mkdir {_cachePath} {_modelPath}\"",
-                #else
-                FileName = "/bin/sh",
-                Arguments = $"-c \"mkdir -p {_cachePath} {_modelPath}\"",
-                #endif
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                CreateNoWindow = true,
-            },
-        }.Start();
+        _maxQueuedGenerations = _cfg.GetCVar(GoobCVars.TTSQueueMax);
+        _cfg.OnValueChanged(GoobCVars.TTSQueueMax, v => _maxQueuedGenerations = v);
+
+        _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(_requestTimeout) };
+
+        var cacheDir = _cachePath.ToString();
+        if (!Directory.Exists(cacheDir))
+            Directory.CreateDirectory(cacheDir);
     }
 
     private void OnCachePathChanged(string path)
-        => _cachePath = MakeDataPath(path);
-    private void OnModelPathChanged(string path)
-        => _modelPath = MakeDataPath(path);
+    {
+        _cachePath = MakeDataPath(path);
+        var cacheDir = _cachePath.ToString();
+        if (!Directory.Exists(cacheDir))
+            Directory.CreateDirectory(cacheDir);
+    }
+
+    private void OnApiUrlChanged(string url) => _apiUrl = url.TrimEnd('/');
+    private void OnApiKeyChanged(string key) => _apiKey = key;
+
+    private void OnTimeoutChanged(int timeout)
+    {
+        _requestTimeout = timeout;
+        _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(timeout) };
+    }
+
     private void OnRateLimitChanged(int limit)
     {
-        int currentCount = _generationSemaphore.CurrentCount;
-
+        var currentCount = _generationSemaphore.CurrentCount;
         if (limit > currentCount)
+        {
             _generationSemaphore.Release(limit - currentCount);
+        }
         else if (limit < currentCount)
         {
-            for (int i = 0; i < (currentCount - limit); i++)
+            for (var i = 0; i < currentCount - limit; i++)
                 _generationSemaphore.Wait();
         }
     }
-    private void OnQueueMaxChanged(int maxQueue)
-        => _maxQueuedGenerations = maxQueue;
 
     private ResPath MakeDataPath(string path)
     {
-        if (path.StartsWith("data/"))
-            return new(_resource.UserData.RootDir + path.Remove(0, 5));
-        else
-            return new(path); // Hope it's valid
+        return path.StartsWith("data/")
+            ? new ResPath(_resource.UserData.RootDir + path.Remove(0, 5))
+            : new ResPath(path);
     }
 
-
     /// <summary>
-    /// Generates audio with passed text by API
+    /// Ensures all required voices are downloaded on the Piper TTS server.
     /// </summary>
-    /// <param name="model">File name for the model</param>
-    /// <param name="speaker">Identifier of speaker</param>
-    /// <param name="text">SSML formatted text</param>
-    /// <returns>OGG audio bytes or null if failed</returns>
-    public async Task<byte[]?> ConvertTextToSpeech(string model, string speaker, string text)
+    public async Task EnsureVoicesDownloadedAsync(IEnumerable<string> requiredVoices)
+    {
+        var availableVoices = await GetAvailableVoicesAsync();
+        if (availableVoices == null)
+            return;
+
+        foreach (var voice in requiredVoices)
+        {
+            if (availableVoices.Contains(voice))
+                continue;
+
+            _sawmill.Info("Voice {Voice} not found on server, attempting to download...", voice);
+            if (await DownloadVoiceAsync(voice))
+                _sawmill.Info("Successfully downloaded voice {Voice}", voice);
+        }
+    }
+
+    private async Task<HashSet<string>?> GetAvailableVoicesAsync()
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"{_apiUrl}/voices");
+        AddAuthHeader(request);
+
+        var response = await SendWithRetryAsync(request);
+        if (response?.IsSuccessStatusCode != true)
+        {
+            _sawmill.Warning("Failed to fetch available voices from Piper API");
+            return null;
+        }
+
+        var json = await response.Content.ReadAsStringAsync();
+        var voices = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
+        return voices?.Keys.ToHashSet() ?? [];
+    }
+
+    private async Task<bool> DownloadVoiceAsync(string voice)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"{_apiUrl}/download");
+        AddAuthHeader(request);
+        request.Content = JsonContent.Create(new DownloadRequest { Voice = voice });
+
+        var response = await SendWithRetryAsync(request);
+        if (response?.IsSuccessStatusCode != true)
+        {
+            _sawmill.Error("Failed to download voice {Voice}", voice);
+            return false;
+        }
+
+        return true;
+    }
+
+    public async Task<byte[]?> ConvertTextToSpeech(string voice, string speaker, string text)
     {
         WantedCount.Inc();
 
-        var key = $"{model}/{speaker}/{text}".GetHashCode();
-        var cachedData = await TryGetCached(key);
+        var key = HashCode.Combine(voice, speaker, text);
+
+        var cachedData = GetFromCache(key);
         if (cachedData != null)
         {
             ReusedCount.Inc();
             return cachedData;
         }
 
-        // TODO:
-        // Instead of just incrementing a integer, we should really keep track of what text + voice is in queue to be generated
-        // This would stop the issue of Urist McHands saying "godo" 30 times before the first "godo" can even be generated and added to the cache
-        // Which would cause it to try to generate the same message 30 times, and would instead just waiting for the first one to generate and then
-        // just reuse the cached version of it.
+        Task<byte[]?>? existingTask;
+        lock (_inFlightLock)
+        {
+            if (_inFlightRequests.TryGetValue(key, out existingTask))
+            {
+                DeduplicatedCount.Inc();
+                _sawmill.Debug("Deduplicating TTS request for: {Text}", text);
+            }
+        }
 
+        if (existingTask != null)
+            return await existingTask;
         if (Interlocked.Increment(ref _queuedGenerations) > _maxQueuedGenerations)
         {
             Interlocked.Decrement(ref _queuedGenerations);
-            _sawmill.Warning($"Queue limit exceeded for TTS generation: {text}");
+            _sawmill.Warning("Queue limit exceeded for TTS generation: {Text}", text);
             return null;
         }
 
+        var generationTask = GenerateAudioAsync(key, voice, speaker, text);
+
+        lock (_inFlightLock)
+        {
+            _inFlightRequests[key] = generationTask;
+        }
+
+        var result = await generationTask;
+
+        lock (_inFlightLock)
+        {
+            _inFlightRequests.Remove(key);
+        }
+
+        Interlocked.Decrement(ref _queuedGenerations);
+        return result;
+    }
+
+    private async Task<byte[]?> GenerateAudioAsync(int key, string voice, string speaker, string text)
+    {
+        await _generationSemaphore.WaitAsync();
+
         try
         {
-            await _generationSemaphore.WaitAsync();
-
-            try
+            var cachedData = GetFromCache(key);
+            if (cachedData != null)
             {
-                var strCmdText = $"echo '{text}' | piper --model {(_modelPath + ResPath.SystemSeparatorStr + model)}.onnx --speaker {speaker} --output_raw";
-
-                var proc = new Process
-                {
-                    StartInfo = new ProcessStartInfo
-                    {
-                        #if WINDOWS
-                        FileName = "cmd.exe",
-                        Arguments = $"/C \"{strCmdText}\"",
-                        #else
-                        FileName = "/bin/sh",
-                        Arguments = $"-c \"{strCmdText}\"",
-                        #endif
-                        UseShellExecute = false,
-                        RedirectStandardOutput = true,
-                        CreateNoWindow = true,
-                    },
-                };
-
-                var reqTime = DateTime.UtcNow;
-                try
-                {
-                    proc.Start();
-
-                    using var memoryStream = new MemoryStream();
-                    await proc.StandardOutput.BaseStream.CopyToAsync(memoryStream).ConfigureAwait(false);
-
-                    await proc.WaitForExitAsync().ConfigureAwait(false);
-
-                    if (proc.ExitCode != 0)
-                    {
-                        RequestTimings.WithLabels("Error").Observe((DateTime.UtcNow - reqTime).TotalSeconds);
-                        _sawmill.Error($"Piper process failed for '{text}' speech by '{speaker}' speaker.");
-                        return null;
-                    }
-
-                    var rawData = memoryStream.ToArray();
-                    TryCache(key, rawData);
-                    return rawData;
-                }
-                catch (Exception e)
-                {
-                    RequestTimings.WithLabels("Error").Observe((DateTime.UtcNow - reqTime).TotalSeconds);
-                    _sawmill.Error($"Failed to generate new sound for '{text}' speech by '{speaker}' speaker\n{e}");
-                    return null;
-                }
+                ReusedCount.Inc();
+                return cachedData;
             }
-            finally
+
+            var reqTime = DateTime.UtcNow;
+
+            using var request = new HttpRequestMessage(HttpMethod.Post, _apiUrl);
+            AddAuthHeader(request);
+
+            var requestBody = new TTSRequest { Text = text, Voice = voice };
+            if (int.TryParse(speaker, out var speakerId))
+                requestBody.SpeakerId = speakerId;
+            else
+                requestBody.Speaker = speaker;
+
+            request.Content = JsonContent.Create(requestBody);
+
+            var response = await SendWithRetryAsync(request);
+
+            if (response == null)
             {
-                _generationSemaphore.Release();
+                RequestTimings.WithLabels("Error").Observe((DateTime.UtcNow - reqTime).TotalSeconds);
+                _sawmill.Error("Failed to connect to Piper TTS API at {Url} after {Retries} retries", _apiUrl, _maxRetries);
+                return null;
             }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                RequestTimings.WithLabels("Error").Observe((DateTime.UtcNow - reqTime).TotalSeconds);
+                _sawmill.Error("Piper API request failed with status {Status} for text: {Text}", response.StatusCode, text);
+                return null;
+            }
+
+            var audioData = await response.Content.ReadAsByteArrayAsync();
+            RequestTimings.WithLabels("Success").Observe((DateTime.UtcNow - reqTime).TotalSeconds);
+
+            SaveToCache(key, audioData);
+            return audioData;
         }
         finally
         {
-            Interlocked.Decrement(ref _queuedGenerations);
+            _generationSemaphore.Release();
         }
     }
 
-    private bool TryCache(int key, byte[] file)
+    private async Task<HttpResponseMessage?> SendWithRetryAsync(HttpRequestMessage request)
     {
-        if (_cfg.GetCVar(GoobCVars.TTSCacheType) != "memory")
-        {
-            var files = Directory.GetFiles(_cachePath + ResPath.SystemSeparatorStr).ToList()
-                .OrderBy(f => File.GetLastWriteTimeUtc(f).Ticks);
-            var count = files.Count();
-            var toDelete = count - _cfg.GetCVar(GoobCVars.TTSMaxCached);
+        var delay = 100;
 
-            for (var i = toDelete; i > 0; i--)
+        for (var attempt = 0; attempt <= _maxRetries; attempt++)
+        {
+            using var clonedRequest = await CloneRequestAsync(request);
+
+            try
             {
-                File.Delete(files.ElementAt(i));
+                var response = await _httpClient.SendAsync(clonedRequest);
+
+                if (response.IsSuccessStatusCode
+                    || (response.StatusCode >= HttpStatusCode.BadRequest
+                    && response.StatusCode < HttpStatusCode.InternalServerError
+                    && response.StatusCode != HttpStatusCode.TooManyRequests))
+                {
+                    return response;
+                }
+
+                if (attempt < _maxRetries)
+                {
+                    _sawmill.Debug("TTS request failed with {Status}, retrying in {Delay}ms (attempt {Attempt}/{MaxRetries})",
+                        response.StatusCode, delay, attempt + 1, _maxRetries);
+                    await Task.Delay(delay);
+                    delay *= 2;
+                }
+                else
+                {
+                    return response;
+                }
             }
-
-            var filePath = _cachePath + ResPath.SystemSeparatorStr + key + ".raw";
-            File.WriteAllBytes(filePath, file);
-
-            return true;
+            catch (TaskCanceledException)
+            {
+                if (attempt < _maxRetries)
+                {
+                    _sawmill.Debug("TTS request timed out, retrying in {Delay}ms (attempt {Attempt}/{MaxRetries})",
+                        delay, attempt + 1, _maxRetries);
+                    await Task.Delay(delay);
+                    delay *= 2;
+                }
+                else
+                {
+                    _sawmill.Warning("TTS request timed out after {Retries} retries", _maxRetries);
+                    return null;
+                }
+            }
+            catch (HttpRequestException e)
+            {
+                if (attempt < _maxRetries)
+                {
+                    _sawmill.Debug("TTS request failed: {Error}, retrying in {Delay}ms (attempt {Attempt}/{MaxRetries})",
+                        e.Message, delay, attempt + 1, _maxRetries);
+                    await Task.Delay(delay);
+                    delay *= 2;
+                }
+                else
+                {
+                    _sawmill.Warning("TTS request failed after {Retries} retries: {Error}", _maxRetries, e.Message);
+                    return null;
+                }
+            }
         }
 
-        // Handle memory caching
-        while (_memoryCache.Count > _cfg.GetCVar(GoobCVars.TTSMaxCached))
-        {
-            _memoryCache.Remove(_memoryCache.First().Key);
-        }
-
-        // Cache to memory
-        return _memoryCache.TryAdd(key, file);
+        return null;
     }
 
+    private static async Task<HttpRequestMessage> CloneRequestAsync(HttpRequestMessage request)
+    {
+        var clone = new HttpRequestMessage(request.Method, request.RequestUri);
 
-    /// Tries to find an existing audio file so we don't have to make another
-    private async Task<byte[]?> TryGetCached(int key)
+        foreach (var header in request.Headers)
+            clone.Headers.TryAddWithoutValidation(header.Key, header.Value);
+
+        if (request.Content != null)
+        {
+            var content = await request.Content.ReadAsByteArrayAsync();
+            clone.Content = new ByteArrayContent(content);
+
+            foreach (var header in request.Content.Headers)
+                clone.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
+        }
+
+        return clone;
+    }
+
+    private void AddAuthHeader(HttpRequestMessage request)
+    {
+        if (!string.IsNullOrEmpty(_apiKey))
+            request.Headers.Add("Authorization", $"Bearer {_apiKey}");
+    }
+
+    private byte[]? GetFromCache(int key)
     {
         var type = _cfg.GetCVar(GoobCVars.TTSCacheType);
-        switch (type)
+
+        if (type == "memory")
+            return _memoryCache.GetValueOrDefault(key);
+
+        if (type == "file")
         {
-            case "file":
-                var path = _cachePath + ResPath.SystemSeparatorStr + key + ".raw";
-                return !File.Exists(path) ? null : await File.ReadAllBytesAsync(path);
-            case "memory":
-                return _memoryCache.GetValueOrDefault(key);
-            default:
-                DebugTools.Assert(false, "TTSCacheType is invalid, must be one of \"file\", \"memory\"");
-                return null;
+            var path = Path.Combine(_cachePath.ToString(), $"{key}.wav");
+            return File.Exists(path) ? File.ReadAllBytes(path) : null;
+        }
+
+        return null;
+    }
+
+    private void SaveToCache(int key, byte[] data)
+    {
+        var type = _cfg.GetCVar(GoobCVars.TTSCacheType);
+
+        if (type == "memory")
+        {
+            while (_memoryCache.Count >= _cfg.GetCVar(GoobCVars.TTSMaxCached))
+                _memoryCache.Remove(_memoryCache.First().Key);
+
+            _memoryCache.TryAdd(key, data);
+            return;
+        }
+
+        if (type == "file")
+        {
+            var cacheDir = _cachePath.ToString();
+            if (!Directory.Exists(cacheDir))
+                return;
+
+            // Clean old files if over limit
+            var files = Directory.GetFiles(cacheDir).OrderBy(File.GetLastWriteTimeUtc).ToList();
+            var toDelete = files.Count - _cfg.GetCVar(GoobCVars.TTSMaxCached);
+            for (var i = 0; i < toDelete && i < files.Count; i++)
+                File.Delete(files[i]);
+
+            File.WriteAllBytes(Path.Combine(cacheDir, $"{key}.wav"), data);
         }
     }
 
-    /// Deletes every file with the .raw extension in the _cachePath and clears the memory cache
     public void ClearCache()
     {
-        new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                #if WINDOWS
-                FileName = "cmd.exe",
-                Arguments = $"/C \"del /q {_cachePath}\\*.raw\"",
-                #else
-                FileName = "/bin/sh",
-                Arguments = $"-c \"rm {_cachePath}/*.raw\"",
-                #endif
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                CreateNoWindow = true,
-            },
-        }.Start();
         _memoryCache.Clear();
+
+        var cacheDir = _cachePath.ToString();
+        if (!Directory.Exists(cacheDir))
+            return;
+
+        foreach (var file in Directory.EnumerateFiles(cacheDir, "*.wav"))
+            File.Delete(file);
+    }
+
+    private sealed class TTSRequest
+    {
+        [JsonPropertyName("text")]
+        public string Text { get; set; } = "";
+
+        [JsonPropertyName("voice")]
+        public string? Voice { get; set; }
+
+        [JsonPropertyName("speaker")]
+        public string? Speaker { get; set; }
+
+        [JsonPropertyName("speaker_id")]
+        public int? SpeakerId { get; set; }
+    }
+
+    private sealed class DownloadRequest
+    {
+        [JsonPropertyName("voice")]
+        public string Voice { get; set; } = "";
     }
 }

@@ -233,7 +233,7 @@ public sealed partial class GoobCVars
         CVarDef.Create("tts.unknown_volume", 0.2f * 4, CVar.ARCHIVE | CVar.CLIENTONLY);
 
     public static readonly CVarDef<bool> TTSEnabled =
-        CVarDef.Create("tts.enabled", false, CVar.SERVERONLY);
+        CVarDef.Create("tts.enabled", true, CVar.SERVERONLY);
 
     /// <summary>
     /// Number of TTS generations that can be done simultaneously
@@ -262,8 +262,29 @@ public sealed partial class GoobCVars
     public static readonly CVarDef<bool> TTSCacheRoundPersistence =
         CVarDef.Create("tts.cache_round_persistence", true, CVar.SERVERONLY);
 
-    public static readonly CVarDef<string> TTSModelPath =
-        CVarDef.Create("tts.model_path", "data/tts/models", CVar.SERVERONLY);
+    /// <summary>
+    /// The URL of the Piper TTS HTTP API server.
+    /// </summary>
+    public static readonly CVarDef<string> TTSApiUrl =
+        CVarDef.Create("tts.api_url", "http://localhost:5000", CVar.SERVERONLY);
+
+    /// <summary>
+    /// The API key for authenticating with the Piper TTS server. Leave empty if no authentication is required.
+    /// </summary>
+    public static readonly CVarDef<string> TTSApiKey =
+        CVarDef.Create("tts.api_key", "secret", CVar.SERVERONLY | CVar.CONFIDENTIAL);
+
+    /// <summary>
+    /// Timeout in seconds for TTS API requests.
+    /// </summary>
+    public static readonly CVarDef<int> TTSRequestTimeout =
+        CVarDef.Create("tts.request_timeout", 15, CVar.SERVERONLY);
+
+    /// <summary>
+    /// Maximum number of retry attempts for failed TTS API requests.
+    /// </summary>
+    public static readonly CVarDef<int> TTSMaxRetries =
+        CVarDef.Create("tts.max_retries", 3, CVar.SERVERONLY);
 
     #endregion
 }

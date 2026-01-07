@@ -1,96 +1,97 @@
+# Male Voices
 - type: ttsVoice
-  id: Bryce
-  name: Bryce
-  model: Bryce
-  sex: Male
-
-- type: ttsVoice
-  id: Arctic
-  name: Arctic
-  model: Arctic
-  sex: Male
-
-- type: ttsVoice
-  id: Danny
-  name: Danny
-  model: Danny
-  sex: Male
-
-- type: ttsVoice
-  id: Jeff
-  name: Jeff
-  model: hfc_male
+  id: Ryan
+  name: Ryan
+  model: en_US-ryan-medium
   sex: Male
 
 - type: ttsVoice
   id: Joe
   name: Joe
-  model: Joe
+  model: en_US-joe-medium
   sex: Male
 
 - type: ttsVoice
   id: John
   name: John
-  model: John
+  model: en_US-john-medium
+  sex: Male
+
+- type: ttsVoice
+  id: Danny
+  name: Danny
+  model: en_US-danny-low
+  sex: Male
+
+- type: ttsVoice
+  id: Alan
+  name: Alan
+  model: en_GB-alan-medium
   sex: Male
 
 - type: ttsVoice
   id: Norman
   name: Norman
-  model: Norman
+  model: en_US-norman-medium
   sex: Male
 
 - type: ttsVoice
-  id: Ryan
-  name: Ryan
-  model: Ryan
+  id: Arctic
+  name: Arctic
+  model: en_US-arctic-medium
   sex: Male
 
+- type: ttsVoice
+  id: Bryce
+  name: Bryce
+  model: en_US-bryce-medium
+  sex: Male
+
+# Female Voices
 - type: ttsVoice
   id: Amy
   name: Amy
-  model: Amy
-  sex: Female
-
-- type: ttsVoice
-  id: Fiona
-  name: Fiona
-  model: hfc_female
-  sex: Female
-
-- type: ttsVoice
-  id: Kathleen
-  name: Kathleen
-  model: Kathleen
-  sex: Female
-
-- type: ttsVoice
-  id: Kristin
-  name: Kristin
-  model: Kristin
-  sex: Female
-
-- type: ttsVoice
-  id: Kusal
-  name: Kusal
-  model: Kusal
-  sex: Male
-
-- type: ttsVoice
-  id: Brit
-  name: Brit
-  model: Libritts
-  sex: Female
-
-- type: ttsVoice
-  id: Kait
-  name: Kait
-  model: Ljspeech
+  model: en_US-amy-medium
   sex: Female
 
 - type: ttsVoice
   id: Lessac
   name: Lessac
-  model: Lessac
+  model: en_US-lessac-medium
   sex: Female
 
+- type: ttsVoice
+  id: Kathleen
+  name: Kathleen
+  model: en_US-kathleen-low
+  sex: Female
+
+- type: ttsVoice
+  id: Kristin
+  name: Kristin
+  model: en_US-kristin-medium
+  sex: Female
+
+- type: ttsVoice
+  id: Jenny
+  name: Jenny
+  model: en_GB-jenny_dioco-medium
+  sex: Female
+
+- type: ttsVoice
+  id: Alba
+  name: Alba
+  model: en_GB-alba-medium
+  sex: Female
+
+- type: ttsVoice
+  id: Cori
+  name: Cori
+  model: en_GB-cori-medium
+  sex: Female
+
+- type: ttsVoice
+  id: Ljspeech
+  name: Ljspeech
+  model: en_US-ljspeech-medium
+  sex: Female
