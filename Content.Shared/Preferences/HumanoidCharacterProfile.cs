@@ -705,9 +705,9 @@ namespace Content.Shared.Preferences
             }
         }
 
-        public static bool CanHaveVoice(TTSVoicePrototype voice, Sex sex)
+        public static bool CanHaveVoice(TTSVoicePrototype voice, Sex _)
         {
-            return voice.CanSelect && sex == Sex.Unsexed || (voice.Sex == sex || voice.Sex == Sex.Unsexed);
+            return voice.CanSelect;
         }
 
 

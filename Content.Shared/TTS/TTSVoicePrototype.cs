@@ -1,5 +1,3 @@
-using Content.Shared.Humanoid;
-using Content.Shared.Prototypes;
 using Robust.Shared.Prototypes;
 
 namespace Content.Shared.TTS;
@@ -13,9 +11,6 @@ public sealed class TTSVoicePrototype : IPrototype
 
     [DataField("name")]
     public string Name { get; } = string.Empty;
-
-    [DataField(required: true)]
-    public Sex Sex;
 
     [DataField(required: true)]
     public string Model = string.Empty;
