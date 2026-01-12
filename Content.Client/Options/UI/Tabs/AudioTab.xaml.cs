@@ -58,6 +58,12 @@ public sealed partial class AudioTab : Control
             scale: ContentAudioSystem.TtsMultiplier
         );
 
+        Control.AddOptionPercentSlider( // Goobstation - TTS Radio
+            GoobCVars.TTSRadioVolume,
+            SliderVolumeTTSRadio,
+            scale: ContentAudioSystem.TtsRadioMultiplier
+        );
+
         Control.AddOptionSlider(
             CCVars.MaxAmbientSources,
             SliderMaxAmbienceSounds,

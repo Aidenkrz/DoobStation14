@@ -1,9 +1,13 @@
 using System.Linq;
 using System.Threading.Tasks;
 using Content.Server.Chat.Systems;
+using Content.Server.Radio.Components;
 using Content.Shared._Goobstation.CCVar;
 using Content.Shared.GameTicking;
+using Content.Shared.Radio;
+using Content.Shared.Radio.Components;
 using Content.Shared.TTS;
+using Robust.Server.GameObjects;
 using Robust.Shared.Configuration;
 using Robust.Shared.Player;
 using Robust.Shared.Prototypes;
@@ -19,20 +23,21 @@ public sealed partial class TTSSystem : EntitySystem
     [Dependency] private readonly TTSManager _ttsManager = default!;
     [Dependency] private readonly SharedTransformSystem _xforms = default!;
     [Dependency] private readonly IRobustRandom _rng = default!;
+    [Dependency] private readonly ActorSystem _actor = default!;
 
     private readonly List<string> _sampleText =
     [
-        "Hello station, I have teleported the janitor.",
-        "Yes, Ms. Sarah, about the theater issue -- will Engineering be dealing with it?",
-        "Since Samuel was detained should we change it to a code green?",
-        "He wants to do an interview, where are you?",
-        "Samuel Rodriguez broke the door to the bridge with an e-mag!",
-        "I want to give credit where it's due -- the newspaper is working, and it's doing quite well. I like it.",
+        "Hello station, I teleported the janitor.",
+        "Ms. Sarah, will Engineering handle the theater issue?",
+        "Since Samuel was detained, should we switch to code green?",
+        "He wants an interview. Where are you?",
+        "Samuel Rodriguez broke the bridge door with an emag!",
+        "Credit where it's due—the newspaper is working great.",
         "Praise and glory from NT.",
-        "Will someone build a podium in the theater?",
-        "Clown, I'm about to be interviewed, I'll be gone about 10 minutes.",
-        "Chief, I'm about to be interviewed, I'll be gone for about 10 minutes.",
-        "As far as I understand, the anomaly broke the barrier between the Singularity and the station."
+        "Can someone build a podium in the theater?",
+        "Clown, I'm heading to an interview. I'll be gone about 10 minutes.",
+        "Chief, I'm heading to an interview. I'll be gone about 10 minutes.",
+        "I think the anomaly broke the barrier between the Singularity and the station."
     ];
 
     private const int MaxMessageChars = 100 * 2;
@@ -108,6 +113,9 @@ public sealed partial class TTSSystem : EntitySystem
         if (!_prototypeManager.TryIndex<TTSVoicePrototype>(voiceId, out var protoVoice))
             return;
 
+        if (args.Channel != null)
+            HandleRadio(uid, args.Channel, args.Message, protoVoice.Model, protoVoice.Speaker);
+
         if (args.IsWhisper)
             HandleWhisper(uid, args.Message, protoVoice.Model, protoVoice.Speaker);
         else
@@ -125,7 +133,7 @@ public sealed partial class TTSSystem : EntitySystem
 
     private async void HandleWhisper(EntityUid uid, string message, string model, string speaker)
     {
-        var soundData = await GenerateTTS(message, model, speaker, true);
+        var soundData = await GenerateTTS(message, model, speaker);
         if (soundData is null)
             return;
 
@@ -146,7 +154,37 @@ public sealed partial class TTSSystem : EntitySystem
         }
     }
 
-    private async Task<byte[]?> GenerateTTS(string text, string model, string speaker, bool isWhisper = false)
+    private async void HandleRadio(EntityUid uid, RadioChannelPrototype channel, string message, string model, string speaker)
+    {
+        var soundData = await GenerateTTS(message, model, speaker);
+        if (soundData is null)
+            return;
+
+        var ttsEvent = new PlayTTSEvent(soundData, GetNetEntity(uid), isRadio: true);
+        var sentTo = new HashSet<ICommonSession>();
+
+        var radioQuery = EntityQueryEnumerator<ActiveRadioComponent>();
+        while (radioQuery.MoveNext(out var receiver, out var radio))
+        {
+            if (!radio.ReceiveAllChannels && !radio.Channels.Contains(channel.ID))
+                continue;
+
+            var target = Transform(receiver).ParentUid;
+            if (target == receiver)
+                target = receiver;
+
+            if (!_actor.TryGetSession(target, out var session) &&
+                !_actor.TryGetSession(receiver, out session))
+            {
+                continue;
+            }
+
+            if (session != null && sentTo.Add(session))
+                RaiseNetworkEvent(ttsEvent, session);
+        }
+    }
+
+    private async Task<byte[]?> GenerateTTS(string text, string model, string speaker)
     {
         var textSanitized = Sanitize(text);
         if (string.IsNullOrEmpty(textSanitized))

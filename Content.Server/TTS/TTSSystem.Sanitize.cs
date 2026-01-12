@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using Content.Server.Chat.Systems;
+using Robust.Shared.Utility;
 
 namespace Content.Server.TTS;
 
@@ -14,6 +15,143 @@ public sealed partial class TTSSystem
     [GeneratedRegex(@"\d+")]
     private static partial Regex DigitsRegex();
 
+    [GeneratedRegex(@"\b[\w']+\b", RegexOptions.IgnoreCase)]
+    private static partial Regex WordRegex();
+
+    private static readonly Dictionary<string, string> WordReplacements = new(StringComparer.OrdinalIgnoreCase)
+    {
+        {"i'm", "I am"},
+        {"i'll", "I will"},
+        {"i've", "I have"},
+        {"i'd", "I would"},
+        {"you're", "you are"},
+        {"you'll", "you will"},
+        {"you've", "you have"},
+        {"you'd", "you would"},
+        {"he's", "he is"},
+        {"he'll", "he will"},
+        {"he'd", "he would"},
+        {"she's", "she is"},
+        {"she'll", "she will"},
+        {"she'd", "she would"},
+        {"it's", "it is"},
+        {"it'll", "it will"},
+        {"it'd", "it would"},
+        {"we're", "we are"},
+        {"we'll", "we will"},
+        {"we've", "we have"},
+        {"we'd", "we would"},
+        {"they're", "they are"},
+        {"they'll", "they will"},
+        {"they've", "they have"},
+        {"they'd", "they would"},
+        {"that's", "that is"},
+        {"that'll", "that will"},
+        {"that'd", "that would"},
+        {"who's", "who is"},
+        {"who'll", "who will"},
+        {"who'd", "who would"},
+        {"what's", "what is"},
+        {"what'll", "what will"},
+        {"what'd", "what would"},
+        {"where's", "where is"},
+        {"where'll", "where will"},
+        {"where'd", "where would"},
+        {"when's", "when is"},
+        {"when'll", "when will"},
+        {"when'd", "when would"},
+        {"why's", "why is"},
+        {"why'll", "why will"},
+        {"why'd", "why would"},
+        {"how's", "how is"},
+        {"how'll", "how will"},
+        {"how'd", "how would"},
+        {"isn't", "is not"},
+        {"aren't", "are not"},
+        {"wasn't", "was not"},
+        {"weren't", "were not"},
+        {"haven't", "have not"},
+        {"hasn't", "has not"},
+        {"hadn't", "had not"},
+        {"won't", "will not"},
+        {"wouldn't", "would not"},
+        {"don't", "do not"},
+        {"doesn't", "does not"},
+        {"didn't", "did not"},
+        {"can't", "cannot"},
+        {"couldn't", "could not"},
+        {"shouldn't", "should not"},
+        {"mightn't", "might not"},
+        {"mustn't", "must not"},
+        {"let's", "let us"},
+        {"there's", "there is"},
+        {"here's", "here is"},
+        {"ain't", "is not"},
+
+        {"id", "eye dee"},
+        {"pda", "P D A"},
+        {"ai", "A I"},
+        {"nt", "N T"},
+        {"ss", "S S"},
+        {"rnd", "R and D"},
+        {"r&d", "R and D"},
+        {"cmo", "C M O"},
+        {"ce", "C E"},
+        {"hos", "H O S"},
+        {"hop", "H O P"},
+        {"qm", "Q M"},
+        {"rd", "R D"},
+        {"atmos", "atmospherics"},
+        {"med", "medical"},
+        {"sci", "science"},
+        {"sec", "security"},
+        {"engi", "engineering"},
+        {"cargo", "cargo"},
+        {"evac", "evacuation"},
+        {"maint", "maintenance"},
+        {"crit", "critical"},
+        {"emag", "E mag"},
+        {"nuke", "nuke"},
+        {"nukie", "nuclear operative"},
+        {"nukies", "nuclear operatives"},
+        {"rev", "revolutionary"},
+        {"revs", "revolutionaries"},
+        {"ling", "changeling"},
+        {"xeno", "xenomorph"},
+        {"xenos", "xenomorphs"},
+        {"syndie", "syndicate"},
+        {"syndies", "syndicates"},
+        {"antag", "antagonist"},
+        {"antags", "antagonists"},
+        {"ss14", "space station fourteen"},
+        {"ss13", "space station thirteen"},
+
+        {"owo", "oh woah"},
+        {"uwu", "ooh woo"},
+        {"xd", "haha"},
+        {"lol", "haha"},
+        {"lmao", "haha"},
+        {"brb", "be right back"},
+        {"afk", "away from keyboard"},
+        {"gg", "good game"},
+        {"wp", "well played"},
+        {"ty", "thank you"},
+        {"thx", "thanks"},
+        {"pls", "please"},
+        {"plz", "please"},
+        {"omg", "oh my god"},
+        {"wtf", "what the heck"},
+        {"idk", "I do not know"},
+        {"imo", "in my opinion"},
+        {"tbh", "to be honest"},
+        {"ngl", "not gonna lie"},
+        {"rn", "right now"},
+        {"btw", "by the way"},
+        {"aka", "also known as"},
+        {"asap", "as soon as possible"},
+        {"fyi", "for your information"},
+    };
+
     private void OnTransformSpeech(TransformSpeechEvent args)
     {
         if (!_isEnabled)
@@ -25,6 +163,9 @@ public sealed partial class TTSSystem
     private static string Sanitize(string text)
     {
         text = text.Trim();
+        text = FormattedMessage.RemoveMarkupPermissive(text);
+        text = WordRegex().Replace(text, match =>
+            WordReplacements.TryGetValue(match.Value, out var replacement) ? replacement : match.Value);
         text = InvalidCharsRegex().Replace(text, "");
         text = DecimalSeparatorRegex().Replace(text, " point ");
         text = DigitsRegex().Replace(text, match => NumberToWords(match.Value));
