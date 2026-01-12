@@ -227,7 +227,7 @@ public sealed partial class GoobCVars
     #region TTS
 
     public static readonly CVarDef<float> TTSVolume =
-        CVarDef.Create("tts.volume", 0.5f * 4, CVar.ARCHIVE | CVar.CLIENTONLY);
+        CVarDef.Create("tts.volume", 1f, CVar.ARCHIVE | CVar.CLIENTONLY);
 
     public static readonly CVarDef<float> TTSUnknownVolume =
         CVarDef.Create("tts.unknown_volume", 0.2f * 4, CVar.ARCHIVE | CVar.CLIENTONLY);

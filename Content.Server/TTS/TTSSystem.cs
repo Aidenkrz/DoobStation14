@@ -81,9 +81,11 @@ public sealed partial class TTSSystem : EntitySystem
 
     private async void OnRequestPreviewTTS(RequestPreviewTTSEvent ev, EntitySessionEventArgs args)
     {
-        if (!_isEnabled ||
-            !_prototypeManager.TryIndex<TTSVoicePrototype>(ev.VoiceId, out var protoVoice))
+        if (!_isEnabled
+            || !_prototypeManager.TryIndex<TTSVoicePrototype>(ev.VoiceId, out var protoVoice))
+        {
             return;
+        }
 
         var previewText = _rng.Pick(_sampleText);
         var soundData = await GenerateTTS(previewText, protoVoice.Model, protoVoice.Speaker);

@@ -44,8 +44,8 @@ public sealed class TTSManager
 
     private ISawmill _sawmill = default!;
     private HttpClient _httpClient = default!;
-    private readonly Dictionary<int, byte[]> _memoryCache = new();
-    private readonly Dictionary<int, Task<byte[]?>> _inFlightRequests = new();
+    private readonly Dictionary<int, byte[]> _memoryCache = [];
+    private readonly Dictionary<int, Task<byte[]?>> _inFlightRequests = [];
     private readonly object _inFlightLock = new();
 
     private ResPath _cachePath;
@@ -103,8 +103,15 @@ public sealed class TTSManager
             Directory.CreateDirectory(cacheDir);
     }
 
-    private void OnApiUrlChanged(string url) => _apiUrl = url.TrimEnd('/');
-    private void OnApiKeyChanged(string key) => _apiKey = key;
+    private void OnApiUrlChanged(string url)
+    {
+        _apiUrl = url.TrimEnd('/');
+    }
+
+    private void OnApiKeyChanged(string key)
+    {
+        _apiKey = key;
+    }
 
     private void OnTimeoutChanged(int timeout)
     {
@@ -129,7 +136,7 @@ public sealed class TTSManager
     private ResPath MakeDataPath(string path)
     {
         return path.StartsWith("data/")
-            ? new ResPath(_resource.UserData.RootDir + path.Remove(0, 5))
+            ? new ResPath(_resource.UserData.RootDir + path[5..])
             : new ResPath(path);
     }
 
@@ -303,9 +310,9 @@ public sealed class TTSManager
                 var response = await _httpClient.SendAsync(clonedRequest);
 
                 if (response.IsSuccessStatusCode
-                    || (response.StatusCode >= HttpStatusCode.BadRequest
+                    || response.StatusCode >= HttpStatusCode.BadRequest
                     && response.StatusCode < HttpStatusCode.InternalServerError
-                    && response.StatusCode != HttpStatusCode.TooManyRequests))
+                    && response.StatusCode != HttpStatusCode.TooManyRequests)
                 {
                     return response;
                 }

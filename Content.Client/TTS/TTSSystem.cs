@@ -21,26 +21,11 @@ public sealed class TTSSystem : EntitySystem
     [Dependency] private readonly IAudioManager _audioInt = default!;
 
     private ISawmill _sawmill = default!;
-    private readonly MemoryContentRoot _contentRoot = new();
-    private static readonly ResPath Prefix = ResPath.Root ;/// "";
-
-    /// <summary>
-    /// Reducing the volume of the TTS when whispering. Will be converted to logarithm.
-    /// </summary>
-    private const float WhisperFade = 4f;
-
-    /// <summary>
-    /// The volume at which the TTS sound will not be heard.
-    /// </summary>
-    private const float MinimalVolume = -10f;
-
     private float _volume = GoobCVars.TTSVolume.DefaultValue;
-    private int _fileIdx = 0;
 
     public override void Initialize()
     {
         _sawmill = Logger.GetSawmill("tts");
-        _res.AddRoot(Prefix, _contentRoot);
         _cfg.OnValueChanged(GoobCVars.TTSVolume, OnTtsVolumeChanged, true);
         SubscribeNetworkEvent<PlayTTSEvent>(OnPlayTTS);
     }
@@ -49,7 +34,6 @@ public sealed class TTSSystem : EntitySystem
     {
         base.Shutdown();
         _cfg.UnsubValueChanged(GoobCVars.TTSVolume, OnTtsVolumeChanged);
-        _contentRoot.Dispose();
     }
 
     public void RequestPreviewTTS(string voiceId)
@@ -66,27 +50,21 @@ public sealed class TTSSystem : EntitySystem
     {
         _sawmill.Verbose($"Play TTS audio {ev.Data.Length} bytes from {ev.SourceUid} entity");
 
-        // Ensure that the data is not empty or invalid
         if (ev.Data.Length == 0)
         {
             _sawmill.Error("Received empty TTS audio data");
             return;
         }
 
-        // Convert the byte array to short[] (2 bytes per short)
         var shortArray = new short[ev.Data.Length / 2];
-        for (int i = 0; i < shortArray.Length; i++)
-        {
-            // Combine two bytes into one short (little-endian)
-            shortArray[i] = (short)((ev.Data[i * 2 + 1] << 8) | (ev.Data[i * 2] & 0xFF));
-        }
+        for (var i = 0; i < shortArray.Length; i++)
+            shortArray[i] = (short) ((ev.Data[i * 2 + 1] << 8) | (ev.Data[i * 2] & 0xFF));
 
-        // Create an AudioStream directly from raw data
         var audioStream = _audioInt.LoadAudioRaw(shortArray, 1, 22050);
 
         var audioParams = AudioParams.Default
-            .WithVolume(AdjustVolume(ev.IsWhisper))
-            .WithMaxDistance(AdjustDistance(ev.IsWhisper));
+            .WithVolume(GetVolume(ev.IsWhisper))
+            .WithMaxDistance(GetDistance(ev.IsWhisper));
 
         if (ev.SourceUid != null)
             _audio.PlayEntity(audioStream, GetEntity(ev.SourceUid.Value), audioParams);
@@ -94,18 +72,20 @@ public sealed class TTSSystem : EntitySystem
             _audio.PlayGlobal(audioStream, audioParams);
     }
 
-    private float AdjustVolume(bool isWhisper)
+    private float GetVolume(bool isWhisper)
     {
-        var volume = MinimalVolume + SharedAudioSystem.GainToVolume(_volume);
+        var volume = _volume;
 
         if (isWhisper)
-            volume -= SharedAudioSystem.GainToVolume(WhisperFade);
+            volume = 0.05f + (volume - 0.05f) * 0.25f;
 
-        return volume;
+        volume *= _volume / 3f;
+
+        return SharedAudioSystem.GainToVolume(volume);
     }
 
-    private float AdjustDistance(bool isWhisper)
+    private float GetDistance(bool isWhisper)
     {
-        return isWhisper ? 5 : 10;
+        return isWhisper ? 5f : 10f;
     }
 }
