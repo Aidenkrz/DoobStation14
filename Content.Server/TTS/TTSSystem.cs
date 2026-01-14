@@ -1,11 +1,9 @@
 using System.Linq;
 using System.Threading.Tasks;
 using Content.Server.Chat.Systems;
-using Content.Server.Radio.Components;
+using Content.Server.Radio;
 using Content.Shared._Goobstation.CCVar;
 using Content.Shared.GameTicking;
-using Content.Shared.Radio;
-using Content.Shared.Radio.Components;
 using Content.Shared.TTS;
 using Robust.Server.GameObjects;
 using Robust.Shared.Configuration;
@@ -49,6 +47,7 @@ public sealed partial class TTSSystem : EntitySystem
 
         SubscribeLocalEvent<TransformSpeechEvent>(OnTransformSpeech);
         SubscribeLocalEvent<TTSComponent, EntitySpokeEvent>(OnEntitySpoke);
+        SubscribeLocalEvent<RadioSpokeEvent>(OnRadioSpoke);
         SubscribeLocalEvent<RoundRestartCleanupEvent>(OnRoundRestartCleanup);
         SubscribeNetworkEvent<RequestPreviewTTSEvent>(OnRequestPreviewTTS);
     }
@@ -106,6 +105,9 @@ public sealed partial class TTSSystem : EntitySystem
         if (!_isEnabled || args.Message.Length > MaxMessageChars || voiceId == null)
             return;
 
+        if (args.Channel != null)
+            return;
+
         var voiceEv = new TransformSpeakerVoiceEvent(uid, voiceId);
         RaiseLocalEvent(uid, voiceEv);
         voiceId = voiceEv.VoiceId;
@@ -113,13 +115,46 @@ public sealed partial class TTSSystem : EntitySystem
         if (!_prototypeManager.TryIndex<TTSVoicePrototype>(voiceId, out var protoVoice))
             return;
 
-        if (args.Channel != null)
-            HandleRadio(uid, args.Channel, args.Message, protoVoice.Model, protoVoice.Speaker);
-
         if (args.IsWhisper)
             HandleWhisper(uid, args.Message, protoVoice.Model, protoVoice.Speaker);
         else
             HandleSay(uid, args.Message, protoVoice.Model, protoVoice.Speaker);
+    }
+
+    private async void OnRadioSpoke(RadioSpokeEvent ev)
+    {
+        if (!_isEnabled || ev.Message.Length > MaxMessageChars)
+            return;
+
+        if (!TryComp<TTSComponent>(ev.MessageSource, out var ttsComp) || ttsComp.VoicePrototypeId == null)
+            return;
+
+        var voiceId = ttsComp.VoicePrototypeId;
+        var voiceEv = new TransformSpeakerVoiceEvent(ev.MessageSource, voiceId);
+        RaiseLocalEvent(ev.MessageSource, voiceEv);
+        voiceId = voiceEv.VoiceId;
+
+        if (!_prototypeManager.TryIndex<TTSVoicePrototype>(voiceId, out var protoVoice))
+            return;
+
+        var soundData = await GenerateTTS(ev.Message, protoVoice.Model, protoVoice.Speaker);
+        if (soundData is null)
+            return;
+
+        var ttsEvent = new PlayTTSEvent(soundData, GetNetEntity(ev.MessageSource), isRadio: true);
+
+        var filter = Filter.Empty();
+        foreach (var receiver in ev.Receivers)
+        {
+            var target = Transform(receiver).ParentUid;
+
+            if (_actor.TryGetSession(target, out var session) && session != null)
+                filter.AddPlayer(session);
+            else if (_actor.TryGetSession(receiver, out session) && session != null)
+                filter.AddPlayer(session);
+        }
+
+        RaiseNetworkEvent(ttsEvent, filter);
     }
 
     private async void HandleSay(EntityUid uid, string message, string model, string speaker)
@@ -152,33 +187,6 @@ public sealed partial class TTSSystem : EntitySystem
             if (distance <= 100) // 10 * 10
                 RaiseNetworkEvent(ttsEvent, session);
         }
-    }
-
-    private async void HandleRadio(EntityUid uid, RadioChannelPrototype channel, string message, string model, string speaker)
-    {
-        var soundData = await GenerateTTS(message, model, speaker);
-        if (soundData is null)
-            return;
-
-        var ttsEvent = new PlayTTSEvent(soundData, GetNetEntity(uid), isRadio: true);
-
-        var filter = Filter.Empty();
-        var radioQuery = EntityQueryEnumerator<ActiveRadioComponent>();
-
-        while (radioQuery.MoveNext(out var receiver, out var radio))
-        {
-            if (!radio.ReceiveAllChannels && !radio.Channels.Contains(channel.ID))
-                continue;
-
-            var target = Transform(receiver).ParentUid;
-
-            if (_actor.TryGetSession(target, out var session) && session != null)
-                filter.AddPlayer(session);
-            else if (_actor.TryGetSession(receiver, out session) && session != null)
-                filter.AddPlayer(session);
-        }
-
-        RaiseNetworkEvent(ttsEvent, filter);
     }
 
     private async Task<byte[]?> GenerateTTS(string text, string model, string speaker)

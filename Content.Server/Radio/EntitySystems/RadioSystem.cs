@@ -121,6 +121,7 @@ public sealed class RadioSystem : EntitySystem
         var hasActiveServer = HasActiveServer(sourceMapId, channel.ID);
         var sourceServerExempt = _exemptQuery.HasComp(radioSource);
 
+        var receivers = new List<EntityUid>(); // Goobstation - TTS
         var radioQuery = EntityQueryEnumerator<ActiveRadioComponent, TransformComponent>();
         while (canSend && radioQuery.MoveNext(out var receiver, out var radio, out var transform))
         {
@@ -148,7 +149,11 @@ public sealed class RadioSystem : EntitySystem
 
             // send the message
             RaiseLocalEvent(receiver, ref ev);
+            receivers.Add(receiver); // Goobstation - TTS
         }
+
+        if (receivers.Count > 0) // Goobstation - TTS
+            RaiseLocalEvent(new RadioSpokeEvent(messageSource, message, channel, receivers));
 
         if (name != Name(messageSource))
             _adminLogger.Add(LogType.Chat, LogImpact.Low, $"Radio message from {ToPrettyString(messageSource):user} as {name} on {channel.LocalizedName}: {message}");
