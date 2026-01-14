@@ -143,14 +143,16 @@ public sealed partial class TTSSystem : EntitySystem
 
         var ttsEvent = new PlayTTSEvent(soundData, GetNetEntity(ev.MessageSource), isRadio: true);
 
+        _actor.TryGetSession(ev.MessageSource, out var speakerSession);
+
         var filter = Filter.Empty();
         foreach (var receiver in ev.Receivers)
         {
             var target = Transform(receiver).ParentUid;
 
-            if (_actor.TryGetSession(target, out var session) && session != null)
+            if (_actor.TryGetSession(target, out var session) && session != null && session != speakerSession)
                 filter.AddPlayer(session);
-            else if (_actor.TryGetSession(receiver, out session) && session != null)
+            else if (_actor.TryGetSession(receiver, out session) && session != null && session != speakerSession)
                 filter.AddPlayer(session);
         }
 
