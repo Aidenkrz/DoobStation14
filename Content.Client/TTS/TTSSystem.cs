@@ -54,7 +54,7 @@ public sealed class TTSSystem : EntitySystem
         }
 
         if (_radioQueue.TryDequeue(out var queued))
-            _currentRadioPlaying = PlayTTSBytes(queued.Data, queued.SourceUid, queued.Params);
+            _currentRadioPlaying = PlayTTSGlobal(queued.Data, queued.Params);
     }
 
     public void RequestPreviewTTS(string voiceId)
@@ -91,7 +91,7 @@ public sealed class TTSSystem : EntitySystem
 
         if (ev.IsRadio)
         {
-            _radioQueue.Enqueue(new QueuedTTS(ev.Data, sourceUid, audioParams));
+            _radioQueue.Enqueue(new QueuedTTS(ev.Data, audioParams));
             return;
         }
 
@@ -109,6 +109,16 @@ public sealed class TTSSystem : EntitySystem
         if (sourceUid != null)
             return _audio.PlayEntity(audioStream, sourceUid.Value, audioParams);
 
+        return _audio.PlayGlobal(audioStream, audioParams);
+    }
+
+    private (EntityUid Entity, AudioComponent Component)? PlayTTSGlobal(byte[] data, AudioParams audioParams)
+    {
+        var shortArray = new short[data.Length / 2];
+        for (var i = 0; i < shortArray.Length; i++)
+            shortArray[i] = (short) ((data[i * 2 + 1] << 8) | (data[i * 2] & 0xFF));
+
+        var audioStream = _audioManager.LoadAudioRaw(shortArray, 1, 22050);
         return _audio.PlayGlobal(audioStream, audioParams);
     }
 
@@ -131,5 +141,5 @@ public sealed class TTSSystem : EntitySystem
         return isWhisper ? 5f : 10f;
     }
 
-    private sealed record QueuedTTS(byte[] Data, EntityUid? SourceUid, AudioParams Params);
+    private sealed record QueuedTTS(byte[] Data, AudioParams Params);
 }
