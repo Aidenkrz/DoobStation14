@@ -161,27 +161,24 @@ public sealed partial class TTSSystem : EntitySystem
             return;
 
         var ttsEvent = new PlayTTSEvent(soundData, GetNetEntity(uid), isRadio: true);
-        var sentTo = new HashSet<ICommonSession>();
 
+        var filter = Filter.Empty();
         var radioQuery = EntityQueryEnumerator<ActiveRadioComponent>();
+
         while (radioQuery.MoveNext(out var receiver, out var radio))
         {
             if (!radio.ReceiveAllChannels && !radio.Channels.Contains(channel.ID))
                 continue;
 
             var target = Transform(receiver).ParentUid;
-            if (target == receiver)
-                target = receiver;
 
-            if (!_actor.TryGetSession(target, out var session) &&
-                !_actor.TryGetSession(receiver, out session))
-            {
-                continue;
-            }
-
-            if (session != null && sentTo.Add(session))
-                RaiseNetworkEvent(ttsEvent, session);
+            if (_actor.TryGetSession(target, out var session) && session != null)
+                filter.AddPlayer(session);
+            else if (_actor.TryGetSession(receiver, out session) && session != null)
+                filter.AddPlayer(session);
         }
+
+        RaiseNetworkEvent(ttsEvent, filter);
     }
 
     private async Task<byte[]?> GenerateTTS(string text, string model, string speaker)

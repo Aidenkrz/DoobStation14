@@ -57,6 +57,10 @@ public sealed class TTSManager
     private int _queuedGenerations;
     private SemaphoreSlim _generationSemaphore = new(1);
 
+    private bool _connectionVerified;
+    private CancellationTokenSource? _connectionRetryCts;
+    private const int ConnectionRetryIntervalMs = 15000;
+
     public TTSManager()
     {
         Initialize();
@@ -106,11 +110,77 @@ public sealed class TTSManager
     private void OnApiUrlChanged(string url)
     {
         _apiUrl = url.TrimEnd('/');
+        _connectionVerified = false;
+        StartConnectionRetry();
     }
 
     private void OnApiKeyChanged(string key)
     {
         _apiKey = key;
+        _connectionVerified = false;
+        StartConnectionRetry();
+    }
+
+    private void StartConnectionRetry()
+    {
+        if (_connectionRetryCts != null)
+            return;
+
+        _connectionRetryCts = new CancellationTokenSource();
+        _ = ConnectionRetryLoopAsync(_connectionRetryCts.Token);
+    }
+
+    private void StopConnectionRetry()
+    {
+        _connectionRetryCts?.Cancel();
+        _connectionRetryCts?.Dispose();
+        _connectionRetryCts = null;
+    }
+
+    private async Task ConnectionRetryLoopAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested && !_connectionVerified)
+        {
+            _sawmill.Info("Attempting to verify TTS API connection at {Url}...", _apiUrl);
+
+            if (await VerifyConnectionAsync())
+            {
+                _connectionVerified = true;
+                _sawmill.Info("TTS API connection verified successfully");
+                StopConnectionRetry();
+                return;
+            }
+
+            _sawmill.Warning("TTS API connection failed, retrying in {Seconds} seconds...", ConnectionRetryIntervalMs / 1000);
+
+            try
+            {
+                await Task.Delay(ConnectionRetryIntervalMs, ct);
+            }
+            catch (TaskCanceledException)
+            {
+                break;
+            }
+        }
+
+        StopConnectionRetry();
+    }
+
+    private async Task<bool> VerifyConnectionAsync()
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"{_apiUrl}/voices");
+            AddAuthHeader(request);
+
+            var response = await _httpClient.SendAsync(request);
+            return response.IsSuccessStatusCode;
+        }
+        catch (Exception e)
+        {
+            _sawmill.Debug("TTS API connection check failed: {Error}", e.Message);
+            return false;
+        }
     }
 
     private void OnTimeoutChanged(int timeout)
@@ -147,7 +217,13 @@ public sealed class TTSManager
     {
         var availableVoices = await GetAvailableVoicesAsync();
         if (availableVoices == null)
+        {
+            StartConnectionRetry();
             return;
+        }
+
+        _connectionVerified = true;
+        StopConnectionRetry();
 
         foreach (var voice in requiredVoices)
         {
@@ -172,6 +248,7 @@ public sealed class TTSManager
             return null;
         }
 
+        _connectionVerified = true;
         var json = await response.Content.ReadAsStringAsync();
         var voices = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
         return voices?.Keys.ToHashSet() ?? [];
@@ -275,6 +352,8 @@ public sealed class TTSManager
             {
                 RequestTimings.WithLabels("Error").Observe((DateTime.UtcNow - reqTime).TotalSeconds);
                 _sawmill.Error("Failed to connect to Piper TTS API at {Url} after {Retries} retries", _apiUrl, _maxRetries);
+                _connectionVerified = false;
+                StartConnectionRetry();
                 return null;
             }
 
@@ -284,6 +363,9 @@ public sealed class TTSManager
                 _sawmill.Error("Piper API request failed with status {Status} for text: {Text}", response.StatusCode, text);
                 return null;
             }
+
+            _connectionVerified = true;
+            StopConnectionRetry();
 
             var audioData = await response.Content.ReadAsByteArrayAsync();
             RequestTimings.WithLabels("Success").Observe((DateTime.UtcNow - reqTime).TotalSeconds);
