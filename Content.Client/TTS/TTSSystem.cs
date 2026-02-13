@@ -22,15 +22,17 @@ public sealed class TTSSystem : EntitySystem
     private ISawmill _sawmill = default!;
     private float _volume;
     private float _radioVolume;
+    private bool _radioQueueEnabled;
 
     private readonly ConcurrentQueue<QueuedTTS> _radioQueue = new();
-    private (EntityUid Entity, AudioComponent Component)? _currentRadioPlaying;
+    private readonly List<(EntityUid Entity, AudioComponent Component)> _currentRadioPlaying = new();
 
     public override void Initialize()
     {
         _sawmill = Logger.GetSawmill("tts");
         _cfg.OnValueChanged(GoobCVars.TTSVolume, OnTtsVolumeChanged, true);
         _cfg.OnValueChanged(GoobCVars.TTSRadioVolume, OnTtsRadioVolumeChanged, true);
+        _cfg.OnValueChanged(GoobCVars.TTSRadioQueue, OnTtsRadioQueueChanged, true);
         SubscribeNetworkEvent<PlayTTSEvent>(OnPlayTTS);
     }
 
@@ -39,22 +41,29 @@ public sealed class TTSSystem : EntitySystem
         base.Shutdown();
         _cfg.UnsubValueChanged(GoobCVars.TTSVolume, OnTtsVolumeChanged);
         _cfg.UnsubValueChanged(GoobCVars.TTSRadioVolume, OnTtsRadioVolumeChanged);
+        _cfg.UnsubValueChanged(GoobCVars.TTSRadioQueue, OnTtsRadioQueueChanged);
     }
 
     public override void Update(float frameTime)
     {
         base.Update(frameTime);
 
-        if (_currentRadioPlaying.HasValue)
-        {
-            if (Deleted(_currentRadioPlaying.Value.Entity))
-                _currentRadioPlaying = null;
-            else
-                return;
-        }
+        // Clean up finished radio TTS
+        _currentRadioPlaying.RemoveAll(x => Deleted(x.Entity));
+
+        // If there's still radio TTS playing globally (queued), don't start another
+        if (_currentRadioPlaying.Count > 0)
+            return;
 
         if (_radioQueue.TryDequeue(out var queued))
-            _currentRadioPlaying = PlayTTSGlobal(queued.Data, queued.Params);
+        {
+            var result = queued.SourceUid.HasValue
+                ? PlayTTSBytes(queued.Data, queued.SourceUid.Value, queued.Params)
+                : PlayTTSGlobal(queued.Data, queued.Params);
+
+            if (result.HasValue)
+                _currentRadioPlaying.Add(result.Value);
+        }
     }
 
     public void RequestPreviewTTS(string voiceId)
@@ -72,6 +81,11 @@ public sealed class TTSSystem : EntitySystem
         _radioVolume = volume;
     }
 
+    private void OnTtsRadioQueueChanged(bool enabled)
+    {
+        _radioQueueEnabled = enabled;
+    }
+
     private void OnPlayTTS(PlayTTSEvent ev)
     {
         _sawmill.Verbose($"Play TTS audio {ev.Data.Length} bytes from {ev.SourceUid} entity");
@@ -82,16 +96,30 @@ public sealed class TTSSystem : EntitySystem
             return;
         }
 
+        var sourceUid = ev.SourceUid.HasValue ? GetEntity(ev.SourceUid.Value) : (EntityUid?) null;
         var volume = ev.IsRadio ? _radioVolume : _volume;
+
+        var isRadioFromDevice = ev.IsRadio && sourceUid.HasValue;
         var audioParams = AudioParams.Default
             .WithVolume(GetVolume(volume, ev.IsWhisper))
-            .WithMaxDistance(GetDistance(ev.IsWhisper, ev.IsRadio));
-
-        var sourceUid = ev.SourceUid.HasValue ? GetEntity(ev.SourceUid.Value) : (EntityUid?) null;
+            .WithMaxDistance(GetDistance(ev.IsWhisper, ev.IsRadio && !isRadioFromDevice));
 
         if (ev.IsRadio)
         {
-            _radioQueue.Enqueue(new QueuedTTS(ev.Data, audioParams));
+            if (_radioQueueEnabled)
+            {
+                _radioQueue.Enqueue(new QueuedTTS(ev.Data, audioParams, sourceUid));
+            }
+            else
+            {
+                // Play immediately without queuing
+                var result = sourceUid.HasValue
+                    ? PlayTTSBytes(ev.Data, sourceUid.Value, audioParams)
+                    : PlayTTSGlobal(ev.Data, audioParams);
+
+                if (result.HasValue)
+                    _currentRadioPlaying.Add(result.Value);
+            }
             return;
         }
 
@@ -134,12 +162,12 @@ public sealed class TTSSystem : EntitySystem
         return SharedAudioSystem.GainToVolume(volume);
     }
 
-    private float GetDistance(bool isWhisper, bool isRadio)
+    private float GetDistance(bool isWhisper, bool isGlobalRadio)
     {
-        if (isRadio)
+        if (isGlobalRadio)
             return 0f;
         return isWhisper ? 5f : 10f;
     }
 
-    private sealed record QueuedTTS(byte[] Data, AudioParams Params);
+    private sealed record QueuedTTS(byte[] Data, AudioParams Params, EntityUid? SourceUid);
 }

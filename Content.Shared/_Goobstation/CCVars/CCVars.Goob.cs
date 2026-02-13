@@ -232,6 +232,13 @@ public sealed partial class GoobCVars
     public static readonly CVarDef<float> TTSRadioVolume =
         CVarDef.Create("tts.radio_volume", 0.5f, CVar.ARCHIVE | CVar.CLIENTONLY);
 
+    /// <summary>
+    /// When enabled, radio TTS messages are queued and played one at a time.
+    /// When disabled, radio TTS messages play immediately and can overlap.
+    /// </summary>
+    public static readonly CVarDef<bool> TTSRadioQueue =
+        CVarDef.Create("tts.radio_queue", true, CVar.ARCHIVE | CVar.CLIENTONLY);
+
     public static readonly CVarDef<float> TTSUnknownVolume =
         CVarDef.Create("tts.unknown_volume", 0.2f * 4, CVar.ARCHIVE | CVar.CLIENTONLY);
 

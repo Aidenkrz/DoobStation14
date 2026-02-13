@@ -2,6 +2,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Content.Server.Chat.Systems;
 using Content.Server.Radio;
+using Content.Server.Radio.Components;
 using Content.Shared._Goobstation.CCVar;
 using Content.Shared.GameTicking;
 using Content.Shared.TTS;
@@ -141,22 +142,55 @@ public sealed partial class TTSSystem : EntitySystem
         if (soundData is null)
             return;
 
-        var ttsEvent = new PlayTTSEvent(soundData, GetNetEntity(ev.MessageSource), isRadio: true);
+        var xformQuery = GetEntityQuery<TransformComponent>();
+        var sourcePos = _xforms.GetWorldPosition(xformQuery.GetComponent(ev.MessageSource), xformQuery);
 
         _actor.TryGetSession(ev.MessageSource, out var speakerSession);
 
-        var filter = Filter.Empty();
+        var globalFilter = Filter.Empty();
+
+        var radioSpeakers = new List<EntityUid>();
+
         foreach (var receiver in ev.Receivers)
         {
-            var target = Transform(receiver).ParentUid;
+            if (HasComp<RadioSpeakerComponent>(receiver))
+            {
+                radioSpeakers.Add(receiver);
+                continue;
+            }
 
-            if (_actor.TryGetSession(target, out var session) && session != null && session != speakerSession)
-                filter.AddPlayer(session);
-            else if (_actor.TryGetSession(receiver, out session) && session != null && session != speakerSession)
-                filter.AddPlayer(session);
+            var target = Transform(receiver).ParentUid;
+            ICommonSession? session = null;
+
+            if (!_actor.TryGetSession(target, out session) || session == null)
+                _actor.TryGetSession(receiver, out session);
+
+            if (session == null || session == speakerSession)
+                continue;
+
+            if (session.AttachedEntity.HasValue)
+            {
+                var playerPos = _xforms.GetWorldPosition(xformQuery.GetComponent(session.AttachedEntity.Value), xformQuery);
+                var distance = (sourcePos - playerPos).Length();
+
+                if (distance <= ChatSystem.VoiceRange)
+                    continue;
+            }
+
+            globalFilter.AddPlayer(session);
         }
 
-        RaiseNetworkEvent(ttsEvent, filter);
+        if (globalFilter.Recipients.Any())
+        {
+            var ttsEvent = new PlayTTSEvent(soundData, GetNetEntity(ev.MessageSource), isRadio: true);
+            RaiseNetworkEvent(ttsEvent, globalFilter);
+        }
+
+        foreach (var speaker in radioSpeakers)
+        {
+            var ttsEvent = new PlayTTSEvent(soundData, GetNetEntity(speaker), isRadio: true);
+            RaiseNetworkEvent(ttsEvent, Filter.Pvs(speaker));
+        }
     }
 
     private async void HandleSay(EntityUid uid, string message, string model, string speaker)
